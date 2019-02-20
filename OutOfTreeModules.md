@@ -2,6 +2,20 @@
 
 翻译自文档：[OutOfTreeModules](https://wiki.gnuradio.org/index.php/OutOfTreeModules)
 
+## 目录
+
+* [什么是树外模块](#什么是树外模块)
+* [教程1：创建一个树外模块](#教程1：创建一个树外模块)
+* [模块的结构](#模块的结构)
+* [教程2：用C++编写一个快(square_ff)](教程2：用C++编写一个快(square_ff)#)
+  * [创建文件](#创建文件)
+  * [测试驱动编程](#测试驱动编程)
+  * [C++代码（第一部分）](#C++代码（第一部分）)
+  * [使用CMake](#使用CMake)
+  * [执行测试](#执行测试)
+* [](#)
+* [](#)
+
 ## 什么是树外模块
 
 树外模块(out-of-tree module)是指不在GNU Radio源代码树中的代码组件。通常情况下，如果你想用自己的功能和模块来拓展GNU Radio，那么这个模块就是你创建的（即你通常不会向实际的GNU Radio源代码树添加内容，除非你打算将它提交给开发者用于上游整合）。这样使得用户可以自主维护代码，并且允许用户使用自定义的功能。  
@@ -182,3 +196,101 @@ int square_ff_impl::general_work (int noutput_items,
 有一个指向输入缓冲区的指针和一个指向输出缓冲区的指针，以及一个for循环来将输入数据平方值赋值给输出缓存。  
 
 ### 使用CMake
+
+如果你之前从未使用过CMake，那么现在是尝试一下的好时机。命令行执行CMake项目的经典流程是这样的：
+
+```shell
+$mkdir build #在模块的顶级目录中
+$cd build /
+$cmake ../ #告诉CMake它的所有配置文件都在上一级文件夹下
+$make #开始构建
+```
+
+### 执行测试
+
+因为我们在C++代码之前写过QA代码，我们可以立即看到我们所写的模块是否正确。  
+我们利用`make test`来运行我们的测试（在执行完`cmake`和`make`之后，在`build/`子目录下运行）。我们将调用一个shell脚本来设置PYTHONPATH环境变量，以便于我们的测试使用代码和库的构建树版本，然后它将执行所有名称格式为`qa_*.py`文件，并报告整体的成功和失败。  
+如果你已经完成啦`square_ff`模块，就可以正常工作：
+
+```shell
+gr-howto/build % make test
+Running tests...
+Test project /home/braun/tmp/gr-howto/build
+    Start 1: test_howto
+1/2 Test #1: test_howto .......................   Passed    0.01 sec
+    Start 2: qa_square_ff
+2/2 Test #2: qa_square_ff .....................   Passed    0.38 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.39 sec
+```
+
+如果在测试过程中出现问题，我们可以深入挖掘一下问题的原因。当我们运行`make test`时，我们实际上调用的是CMake程序的`ctest`，我们可以给它传递一些参数来获得更多详细的信息。假设我们忘了相乘`in[i]*in[i]`，即实际上并没有对信号进行平方。如果我们只是运行`make test`，甚至是`ctest`，我们会得到下面的反馈：
+
+```shell
+gr-howto/build  $ ctest
+Test project /home/braun/tmp/gr-howto/build
+    Start 1: test_howto
+1/2 Test #1: test_howto .......................   Passed    0.02 sec
+    Start 2: qa_square_ff
+2/2 Test #2: qa_square_ff .....................***Failed    0.21 sec
+
+50% tests passed, 1 tests failed out of 2
+
+Total Test time (real) =   0.23 sec
+
+The following tests FAILED:
+      2 - qa_square_ff (Failed)
+Errors while running CTest
+```
+
+为了找出我们的qa_square_ff测试发生了什么，我们执行`ctest -V -R square`。'-V'指令会给出详细输出，'-R'指令是一个正则表达式，只运行名称匹配的测试。
+
+```shell
+gr-howto/build  $ ctest -V -R square
+UpdateCTestConfiguration  from :/home/braun/tmp/gr-howto/build/DartConfiguration.tcl
+UpdateCTestConfiguration  from :/home/bruan/tmp/gr-howto/build/DartConfiguration.tcl
+Test project /home/braun/tmp/gr-howto/build
+Constructing a list of tests
+Done constructing a list of tests
+Checking test dependency graph...
+Checking test dependency graph end
+test 2
+    Start 2: qa_square_ff
+
+2: Test command: /bin/sh "/home/bruan/tmp/gr-howto/build/python/qa_square_ff_test.sh"
+2: Test timeout computed to be: 9.99988e+06
+2: F
+2: ======================================================================
+2: FAIL: test_001_t (__main__.qa_square_ff)
+2: ----------------------------------------------------------------------
+2: Traceback (most recent call last):
+2:   File "/home/braun/tmp/gr-howto/python/qa_square_ff.py", line 44, in test_001_t
+2:     self.assertFloatTuplesAlmostEqual(expected_result, result_data, 6)
+2:   File "/opt/gr/lib/python2.7/dist-packages/gnuradio/gr_unittest.py", line 90, in assertFloatTuplesAlmostEqual
+2:     self.assertAlmostEqual (a[i], b[i], places, msg)
+2: AssertionError: 9 != -3.0 within 6 places
+2: 
+2: ----------------------------------------------------------------------
+2: Ran 1 test in 0.002s
+2: 
+2: FAILED (failures=1)
+1/1 Test #2: qa_square_ff .....................***Failed    0.21 sec
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   0.21 sec
+
+The following tests FAILED:
+      2 - qa_square_ff (Failed)
+Errors while running CTest
+```
+
+返回结果"9!=-3.0"，我们可以根据这些信息返回修改我们的模块，直到测试通过。  
+我们还可以在我们的QA代码中将失败状态打印出来，例如打印`epected_result`和`result_data`进行比较来更好的查出问题。
+
+### 更多的C++代码——常见模式的子类
+
+`gr::block`在使用输入流和生成输出流方面给予用户很大的灵活性。灵活地使用`forecast()`和`consume()`可以建立变速率的模块。  
+另一方面，信号处理模块中，输入速率和输出速率之间存在某种固定关系是很正常的。有很多是1:1的关系，当然也存在1:N或者N:1的情况。
